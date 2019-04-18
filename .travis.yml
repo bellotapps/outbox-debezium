@@ -1,0 +1,9 @@
+language: java
+install: mvn clean install -DskipTests=true -P travis-ci -B -V
+script: mvn test -P travis-ci -B
+cache:
+  directories:
+    - $HOME/.m2
+
+jdk:
+  - openjdk11
