@@ -2,8 +2,6 @@
 
 A framework for sending transactional messages using the outbox pattern, relying on debezium.
 
-**Java 11 is required for this framework to be used.**
-
 
 ## Description
 
@@ -67,6 +65,15 @@ After adding the ```outbox-debezium-bom``` artifact as an imported managed depen
 **Note:** A placeholder is used as ```version``` in the previous example to avoid changing this readme each time a new version is released. Replace the ```${outbox-debezium.version}``` placeholder with the actual version of the ```outbox-debezium``` project.
 
 
+### Kafka Connectors
+
+The ```outbox-debezium-routing-0.0.1-SNAPSHOT.jar``` artifact contains Kafka Connectors that must be added.
+These connectors allow message routing based on the published data.
+For example, the outbox table for messages to be sent by a producer must contain a ```recipient``` column.
+So, when streaming a change over this table, the ```MessageRouter``` connector will publich the message in the topic for that recipient.
+
+
+For more information about Kafka Connect, check [https://kafka.apache.org/21/documentation.html#connectapi](https://kafka.apache.org/21/documentation.html#connectapi) and [https://kafka.apache.org/documentation.html#connect](https://kafka.apache.org/documentation.html#connect)
 
 ## Useful Resources
 
