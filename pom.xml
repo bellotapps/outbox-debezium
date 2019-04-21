@@ -22,6 +22,7 @@
         <module>outbox-debezium-consumer</module>
         <module>outbox-debezium-producer</module>
         <module>outbox-debezium-routing</module>
+        <module>outbox-debezium-producer-api</module>
     </modules>
 
     <properties>

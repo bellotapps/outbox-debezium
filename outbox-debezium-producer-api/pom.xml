@@ -10,7 +10,7 @@
         <version>${revision}</version>
     </parent>
 
-    <artifactId>outbox-debezium-producer</artifactId>
+    <artifactId>outbox-debezium-producer-api</artifactId>
     <name>${project.groupId}:${project.artifactId}</name>
     <packaging>jar</packaging>
 
@@ -21,13 +21,8 @@
     <dependencies>
         <dependency>
             <groupId>com.bellotapps.messaging</groupId>
-            <artifactId>outbox-debezium-producer-api</artifactId>
+            <artifactId>outbox-debezium-commons</artifactId>
             <version>${revision}</version>
-        </dependency>
-
-        <dependency>
-            <groupId>org.slf4j</groupId>
-            <artifactId>slf4j-api</artifactId>
         </dependency>
     </dependencies>
 </project>
