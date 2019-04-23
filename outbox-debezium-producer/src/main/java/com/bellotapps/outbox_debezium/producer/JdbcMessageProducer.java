@@ -33,14 +33,14 @@ import static com.bellotapps.outbox_debezium.commons.MessageFields.*;
 
 
 /**
- * Created by Juan Marcos Bellini on 2019-04-19.
+ * Concrete implementation of {@link MessageProducer}, using the classes in the {@link java.sql} package.
  */
-public class JdbcMessageSender implements MessageSender {
+public class JdbcMessageProducer implements MessageProducer {
 
     /**
      * The {@link Logger}.
      */
-    private final static Logger LOGGER = LoggerFactory.getLogger(JdbcMessageSender.class);
+    private final static Logger LOGGER = LoggerFactory.getLogger(JdbcMessageProducer.class);
 
     /**
      * The outbox publish sql query pattern (i.e can be customized with the schema and table name of the outbox).
@@ -54,11 +54,13 @@ public class JdbcMessageSender implements MessageSender {
     private final String sql;
 
     /**
-     * A {@link Supplier} of {@link Connection}
-     * (i.e used when executing the {@link #send(Message, String)} method, in order to get a {@link Connection}
-     * in which the transaction in which the outbox publish is happening).
+     * A {@link Supplier} of {@link Connection}.
+     * This {@link Supplier} will be used when the {@link #send(Message, String)} method is executed
+     * in order to obtain a {@link Connection} through which the underlying database will be accessed
+     * (i.e to publish the message in the outbox table).
      */
     private final Supplier<Connection> connectionSupplier;
+
 
     /**
      * Constructor.
@@ -66,17 +68,25 @@ public class JdbcMessageSender implements MessageSender {
      * @param schema             The schema in which the outbox table resides.
      * @param table              The outbox table.
      * @param connectionSupplier A {@link Supplier} of {@link Connection}.
-     *                           Must return a {@link Connection} in which the transaction
-     *                           in which the outbox publish is happening.
+     *                           This {@link Supplier} will be used when the {@link #send(Message, String)}
+     *                           method is executed in order to obtain a {@link Connection}
+     *                           through which the underlying database will be accessed
+     *                           (i.e to publish the message in the outbox table).
      */
-    public JdbcMessageSender(final String schema, final String table, final Supplier<Connection> connectionSupplier) {
+    public JdbcMessageProducer(final String schema, final String table, final Supplier<Connection> connectionSupplier) {
         this.connectionSupplier = connectionSupplier;
         this.sql = MessageFormat
                 .format(SQL_PATTERN, schema, table, MESSAGE_ID, SENDER, RECIPIENT, TIMESTAMP, HEADERS, PAYLOAD);
-
-
     }
 
+
+    /**
+     * {@inheritDoc}
+     *
+     * @implNote This method won't start any transaction.
+     * Starting a transaction should be done before executing this method
+     * (i.e must be done using the {@link Connection} returned by the {@link #connectionSupplier}).
+     */
     @Override
     public void send(final Message message, final String recipient) {
         final Connection connection = connectionSupplier.get();

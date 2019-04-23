@@ -19,13 +19,12 @@ package com.bellotapps.outbox_debezium.producer;
 import com.bellotapps.outbox_debezium.commons.Message;
 
 /**
- * Defines behaviour for an object that can publish messages in the outbox table.
+ * Defines behaviour for an object that can send messages.
  */
-public interface MessageSender {
+public interface MessageProducer {
 
     /**
      * Sends the given {@code message} to the given {@code recipient}
-     * (i.e it publish a message in the outbox table).
      *
      * @param message   The {@link Message} to be sent.
      * @param recipient The recipient of the {@link Message}.

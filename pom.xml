@@ -19,6 +19,7 @@
     <modules>
         <module>outbox-debezium-bom</module>
         <module>outbox-debezium-commons</module>
+        <module>outbox-debezium-consumer-api</module>
         <module>outbox-debezium-consumer</module>
         <module>outbox-debezium-producer</module>
         <module>outbox-debezium-routing</module>
@@ -285,6 +286,7 @@
                                     <name>keep</name>
                                     <properties>keep</properties>
                                     <modules>keep</modules>
+                                    <dependencyManagement>keep</dependencyManagement>
                                 </pomElements>
                             </configuration>
                         </execution>

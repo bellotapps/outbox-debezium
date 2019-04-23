@@ -32,7 +32,17 @@
             </dependency>
             <dependency>
                 <groupId>com.bellotapps.messaging</groupId>
+                <artifactId>outbox-debezium-consumer-api</artifactId>
+                <version>${revision}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.bellotapps.messaging</groupId>
                 <artifactId>outbox-debezium-producer</artifactId>
+                <version>${revision}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.bellotapps.messaging</groupId>
+                <artifactId>outbox-debezium-producer-api</artifactId>
                 <version>${revision}</version>
             </dependency>
             <dependency>
@@ -42,4 +52,24 @@
             </dependency>
         </dependencies>
     </dependencyManagement>
+
+    <build>
+        <plugins>
+            <!-- Configure flatten plugin for a BOM project -->
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>flatten-maven-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>flatten</id>
+                        <configuration>
+                            <pomElements>
+                                <dependencyManagement>keep</dependencyManagement>
+                            </pomElements>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
 </project>
