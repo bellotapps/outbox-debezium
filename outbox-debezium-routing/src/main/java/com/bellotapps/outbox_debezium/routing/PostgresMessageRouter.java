@@ -24,6 +24,7 @@ import org.apache.kafka.connect.connector.ConnectRecord;
 import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.data.SchemaBuilder;
 import org.apache.kafka.connect.data.Struct;
+import org.apache.kafka.connect.data.Timestamp;
 import org.apache.kafka.connect.errors.DataException;
 import org.apache.kafka.connect.transforms.Transformation;
 import org.slf4j.Logger;
@@ -39,12 +40,12 @@ import java.util.stream.Collectors;
  * Re-routes records from the outbox table to the topic indicated by the {@link MessageFields#RECIPIENT} field
  * of the "after" data in the {@link ConnectRecord} to be processed.
  */
-public class MessageRouter<R extends ConnectRecord<R>> implements Transformation<R> {
+public class PostgresMessageRouter<R extends ConnectRecord<R>> implements Transformation<R> {
 
     /**
      * A {@link Logger}.
      */
-    private final static Logger LOGGER = LoggerFactory.getLogger(MessageRouter.class);
+    private final static Logger LOGGER = LoggerFactory.getLogger(PostgresMessageRouter.class);
 
 
     @Override
@@ -161,7 +162,7 @@ public class MessageRouter<R extends ConnectRecord<R>> implements Transformation
             final Message.Builder messageBuilder = Message.Builder.create()
                     .withId(data.getString(MessageFields.MESSAGE_ID))
                     .from(data.getString(MessageFields.SENDER))
-                    .at(data.getInt64(MessageFields.TIMESTAMP));
+                    .at(Timestamp.toLogical(Timestamp.SCHEMA, data.getInt64(MessageFields.TIMESTAMP)).toInstant());
             // Then check if there are headers present
             if (data.schema().field(MessageFields.HEADERS) != null) {
                 final String headers = data.getString(MessageFields.HEADERS);
@@ -199,7 +200,7 @@ public class MessageRouter<R extends ConnectRecord<R>> implements Transformation
         final SchemaBuilder messageSchemaBuilder = SchemaBuilder.struct()
                 .field(MessageFields.MESSAGE_ID, Schema.STRING_SCHEMA)
                 .field(MessageFields.SENDER, Schema.STRING_SCHEMA)
-                .field(MessageFields.TIMESTAMP, Schema.INT64_SCHEMA);
+                .field(MessageFields.TIMESTAMP, Timestamp.SCHEMA);
         message.getHeaders().keySet().forEach(key -> messageSchemaBuilder.field(key, Schema.STRING_SCHEMA));
         message.getPayload().ifPresent(ign -> messageSchemaBuilder.field(MessageFields.PAYLOAD, Schema.STRING_SCHEMA));
         return messageSchemaBuilder.build();

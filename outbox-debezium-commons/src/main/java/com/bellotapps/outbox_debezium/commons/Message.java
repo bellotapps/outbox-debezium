@@ -19,10 +19,9 @@ package com.bellotapps.outbox_debezium.commons;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.Validate;
 
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Optional;
+import java.time.Instant;
+import java.util.*;
+import java.util.function.Supplier;
 
 /**
  * Represents a message.
@@ -43,7 +42,7 @@ public class Message {
     /**
      * The timestamp of the message.
      */
-    private final long timestamp;
+    private final Instant timestamp;
 
     /**
      * The message headers.
@@ -68,7 +67,7 @@ public class Message {
     private Message(
             final String id,
             final String sender,
-            final Long timestamp,
+            final Instant timestamp,
             final Map<String, String> headers,
             final String payload) throws IllegalArgumentException {
         Validate.isTrue(StringUtils.isNotBlank(id), "The id must have text");
@@ -103,7 +102,7 @@ public class Message {
     /**
      * @return The timestamp of the message.
      */
-    public long getTimestamp() {
+    public Instant getTimestamp() {
         return timestamp;
     }
 
@@ -138,7 +137,7 @@ public class Message {
         /**
          * The timestamp of the {@link Message}.
          */
-        private Long timestamp;
+        private Supplier<Instant> timestampSupplier;
         /**
          * The headers of the {@link Message}.
          */
@@ -167,6 +166,16 @@ public class Message {
         }
 
         /**
+         * Sets a random id to the {@link Message} to be built.
+         *
+         * @return {@code this} for method chaining.
+         * @implNote This methods uses {@link UUID#randomUUID()} for random id generation.
+         */
+        public Builder withRandomId() {
+            return withId(UUID.randomUUID().toString());
+        }
+
+        /**
          * Sets the sender of the {@link Message} to be built.
          *
          * @param sender The sender of the {@link Message}.
@@ -178,15 +187,48 @@ public class Message {
         }
 
         /**
-         * Sets the timestamp of the {@link Message} to be built.
+         * Sets the timestamp of the {@link Message} to be built to now.
          *
-         * @param timestamp The timestamp of the {@link Message}.
          * @return {@code this} for method chaining.
          */
-        public Builder at(final Long timestamp) {
-            this.timestamp = timestamp;
+        public Builder atNow() {
+            return at(Instant.now());
+        }
+
+        /**
+         * Sets the timestamp of the {@link Message} to be built.
+         *
+         * @param timestamp The {@link Instant} representing the timestamp of the {@link Message}.
+         * @return {@code this} for method chaining.
+         */
+        public Builder at(final Instant timestamp) {
+            return atSupplied(() -> timestamp);
+        }
+
+
+        /**
+         * Makes the builder use {@link Instant#now()} as a {@link Supplier} of {@link Instant}.
+         * This means that the {@link Message} will have as a timestamp the moment it is created
+         * by the {@link #build()} method.
+         *
+         * @return {@code this} for method chaining.
+         */
+        public Builder atBuildTime() {
+            return atSupplied(Instant::now);
+        }
+
+        /**
+         * Sets a {@link Supplier} of {@link Instant} to be used to generate the timestamp of the {@link Message}
+         * to be built. The {@link Supplier#get()} method will be executed when the {@link #build()} method is executed.
+         *
+         * @param timestampSupplier The {@link Supplier} of {@link Instant} to be used.
+         * @return {@code this} for method chaining.
+         */
+        public Builder atSupplied(final Supplier<Instant> timestampSupplier) {
+            this.timestampSupplier = timestampSupplier;
             return this;
         }
+
 
         /**
          * Replaces all the headers in this builders with the given {@code headers}.
@@ -267,7 +309,7 @@ public class Message {
         public Builder clear() {
             this.id = null;
             this.sender = null;
-            this.timestamp = null;
+            this.timestampSupplier = null;
             this.headers.clear();
             this.payload = null;
 
@@ -282,7 +324,13 @@ public class Message {
          * @throws IllegalArgumentException If any argument is invalid.
          */
         public Message build() throws IllegalArgumentException {
-            return new Message(id, sender, timestamp, headers, payload);
+            if (id == null) {
+                withRandomId();
+            }
+            if (timestampSupplier == null) {
+                atBuildTime();
+            }
+            return new Message(id, sender, timestampSupplier.get(), headers, payload);
         }
 
         /**

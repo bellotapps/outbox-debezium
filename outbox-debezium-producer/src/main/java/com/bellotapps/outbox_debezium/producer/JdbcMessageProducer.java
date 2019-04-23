@@ -24,6 +24,7 @@ import org.slf4j.LoggerFactory;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
+import java.sql.Timestamp;
 import java.text.MessageFormat;
 import java.util.Optional;
 import java.util.function.Supplier;
@@ -121,7 +122,7 @@ public class JdbcMessageProducer implements MessageProducer {
             preparedStatement.setString(1, message.getId());
             preparedStatement.setString(2, message.getSender());
             preparedStatement.setString(3, recipient);
-            preparedStatement.setLong(4, message.getTimestamp());
+            preparedStatement.setTimestamp(4, Timestamp.from(message.getTimestamp()));
             preparedStatement.setString(5, StringUtils.isBlank(headers) ? null : headers);
             preparedStatement.setString(6, payloadOptional.orElse(null));
         } catch (final SQLException e) {
