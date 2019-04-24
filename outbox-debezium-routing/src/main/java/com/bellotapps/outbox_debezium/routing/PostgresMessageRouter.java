@@ -16,29 +16,34 @@
 
 package com.bellotapps.outbox_debezium.routing;
 
-import com.bellotapps.outbox_debezium.commons.Message;
 import com.bellotapps.outbox_debezium.commons.MessageFields;
-import org.apache.commons.lang3.StringUtils;
 import org.apache.kafka.common.config.ConfigDef;
 import org.apache.kafka.connect.connector.ConnectRecord;
+import org.apache.kafka.connect.data.Field;
 import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.data.SchemaBuilder;
 import org.apache.kafka.connect.data.Struct;
-import org.apache.kafka.connect.data.Timestamp;
 import org.apache.kafka.connect.errors.DataException;
 import org.apache.kafka.connect.transforms.Transformation;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.Arrays;
 import java.util.Map;
 import java.util.Optional;
-import java.util.stream.Collectors;
 
 
 /**
  * Re-routes records from the outbox table to the topic indicated by the {@link MessageFields#RECIPIENT} field
  * of the "after" data in the {@link ConnectRecord} to be processed.
+ * <p>
+ * This component works with Postgres.
+ * Behaviour when being used with other database system is unknown.
+ * Specially because of the timestamp data type serialization.
+ * <p>
+ * Check <a href="https://debezium.io/docs/connectors"/>Debezium's connectors documentation</a>
+ * to check compatibilities, and to know how to create a new {@link Transformation} for other database systems.
+ *
+ * @see <a href="https://debezium.io/docs/">Debezium's Documentation</a>
  */
 public class PostgresMessageRouter<R extends ConnectRecord<R>> implements Transformation<R> {
 
@@ -71,7 +76,7 @@ public class PostgresMessageRouter<R extends ConnectRecord<R>> implements Transf
         }
 
         if (!record.valueSchema().type().equals(Schema.Type.STRUCT)) {
-            LOGGER.warn("Received a record that is not a struct. Skipping record!");
+            LOGGER.warn("Received a record that is not a Struct. Skipping record!");
             return null;
         }
 
@@ -96,25 +101,21 @@ public class PostgresMessageRouter<R extends ConnectRecord<R>> implements Transf
                 LOGGER.warn("Skipping record as topic could not be gotten from data");
                 return null;
             }
-            final Optional<Message> messageOptional = buildMessageFromData(data);
-            if (!messageOptional.isPresent()) {
-                LOGGER.warn("Skipping record as message could not be created from data");
+            final Optional<Struct> structOptional = getStructFromData(data);
+            if (!structOptional.isPresent()) {
+                LOGGER.warn("Skipping record as message information could not be taken from data");
                 return null;
             }
 
             final String topic = topicOptional.get();
-            final Message message = messageOptional.get();
-
-            final Schema messageSchema = buildMessageSchema(message);
-            final Struct messageStruct = buildMessageStruct(message, messageSchema);
-
+            final Struct struct = structOptional.get();
             return record.newRecord(
                     topic,
                     record.kafkaPartition(),
                     Schema.STRING_SCHEMA,
                     "message",
-                    messageSchema,
-                    messageStruct,
+                    struct.schema(),
+                    struct,
                     record.timestamp()
             );
         } catch (final DataException e) {
@@ -127,6 +128,10 @@ public class PostgresMessageRouter<R extends ConnectRecord<R>> implements Transf
         }
     }
 
+
+    // ================================================================================================================
+    // Helpers
+    // ================================================================================================================
 
     /**
      * Analyzes the given {@code data} for the kafka topic.
@@ -150,38 +155,56 @@ public class PostgresMessageRouter<R extends ConnectRecord<R>> implements Transf
     }
 
     /**
-     * Builds a {@link Message} from the given {@code data}.
+     * Creates a {@link Struct} with message data to be streamed from the given {@code data} {@link Struct}.
      *
-     * @param data A {@link Struct} from where message data will be taken.
-     * @return An {@link Optional} with the {@link Message} if all needed data is available (with corresponding type),
-     * or empty otherwise.
+     * @param data The {@link Struct} from where the message to be streamed data is taken.
+     * @return An {@link Optional} with the created {@link Struct} if everything is good to go,
+     * or empty if the given {@code data} has missing fields, or the types are not the expected.
      */
-    private static Optional<Message> buildMessageFromData(final Struct data) {
+    private static Optional<Struct> getStructFromData(final Struct data) {
         try {
-            // First, create the builder with the mandatory fields (id, sender and timestamp).
-            final Message.Builder messageBuilder = Message.Builder.create()
-                    .withId(data.getString(MessageFields.MESSAGE_ID))
-                    .from(data.getString(MessageFields.SENDER))
-                    .at(Timestamp.toLogical(Timestamp.SCHEMA, data.getInt64(MessageFields.TIMESTAMP)).toInstant());
-            // Then check if there are headers present
-            if (data.schema().field(MessageFields.HEADERS) != null) {
-                final String headers = data.getString(MessageFields.HEADERS);
-                final Map<String, String> headersMap = Arrays.stream(StringUtils.split(headers, "\n"))
-                        .map(str -> StringUtils.split(str, ":", 2))
-                        .filter(arr -> arr.length == 2) // Only headers with key and value
-                        .peek(arr -> arr[0] = arr[0].trim()) // Trim key
-                        .peek(arr -> arr[1] = arr[1].trim()) // Trim value
-                        .collect(Collectors.toMap(arr -> arr[0], arr -> arr[1]));
-                messageBuilder.withHeaders(headersMap);
+            // First check fields
+            final Optional<Field> idOptional = Optional.ofNullable(data.schema().field(MessageFields.MESSAGE_ID));
+            final Optional<Field> senderOptional = Optional.ofNullable(data.schema().field(MessageFields.SENDER));
+            final Optional<Field> timestampOptional = Optional.ofNullable(data.schema().field(MessageFields.TIMESTAMP));
+            final Optional<Field> headersOptional = Optional.ofNullable(data.schema().field(MessageFields.HEADERS));
+            final Optional<Field> payloadOptional = Optional.ofNullable(data.schema().field(MessageFields.PAYLOAD));
+
+            // Check if mandatory fields are present. Return an empty Optional if any is missing.
+            if (!(idOptional.isPresent() && senderOptional.isPresent() && timestampOptional.isPresent())) {
+                LOGGER.warn("Missing mandatory data. Skipping record!");
+                return Optional.empty();
             }
-            // Then check if there is a payload present
-            if (data.schema().field(MessageFields.PAYLOAD) != null) {
-                messageBuilder.withPayload(data.getString(MessageFields.PAYLOAD));
-            }
-            // Finally, build the message.
-            return Optional.of(messageBuilder.build());
-        } catch (final IllegalArgumentException | DataException e) {
-            LOGGER.warn("Missing or invalid data. Skipping record!");
+            final Field id = idOptional.get();
+            final Field sender = senderOptional.get();
+            final Field timestamp = timestampOptional.get();
+
+
+            // Up to now we know that the Schema and Struct must be created.
+            // Start creating the schema with mandatory stuff.
+            final SchemaBuilder schemaBuilder = SchemaBuilder.struct()
+                    .field(MessageFields.MESSAGE_ID, id.schema())
+                    .field(MessageFields.SENDER, sender.schema())
+                    .field(MessageFields.TIMESTAMP, timestamp.schema());
+            // Add headers and payload if needed
+            headersOptional.ifPresent(field -> setUpField(schemaBuilder, field));
+            payloadOptional.ifPresent(field -> setUpField(schemaBuilder, field));
+            // Build the schema
+            final Schema schema = schemaBuilder.build();
+
+
+            // Now the struct must be created. This consists of copying data into the new Struct.
+            final Struct struct = new Struct(schema);
+            putField(struct, data, id);
+            putField(struct, data, sender);
+            putField(struct, data, timestamp);
+            headersOptional.ifPresent(field -> putField(struct, data, field));
+            payloadOptional.ifPresent(field -> putField(struct, data, field));
+
+            // Now, return the new Struct.
+            return Optional.of(struct);
+        } catch (final DataException e) {
+            LOGGER.warn("Invalid data. Skipping record!");
             logErrorAndStacktrace(e);
             return Optional.empty();
         } catch (final Throwable e) {
@@ -190,37 +213,35 @@ public class PostgresMessageRouter<R extends ConnectRecord<R>> implements Transf
         }
     }
 
+
     /**
-     * Builds a {@link Struct} {@link Schema} for a {@link Message}.
+     * Sets up the given {@code field} in the given {@code schemaBuilder}.
      *
-     * @param message The {@link Message} from which the {@link Schema} will be built.
-     * @return The created {@link Schema}.
+     * @param schemaBuilder The {@link SchemaBuilder} being configured.
+     * @param field         The {@link Field} being configured.
      */
-    private static Schema buildMessageSchema(final Message message) {
-        final SchemaBuilder messageSchemaBuilder = SchemaBuilder.struct()
-                .field(MessageFields.MESSAGE_ID, Schema.STRING_SCHEMA)
-                .field(MessageFields.SENDER, Schema.STRING_SCHEMA)
-                .field(MessageFields.TIMESTAMP, Timestamp.SCHEMA);
-        message.getHeaders().keySet().forEach(key -> messageSchemaBuilder.field(key, Schema.STRING_SCHEMA));
-        message.getPayload().ifPresent(ign -> messageSchemaBuilder.field(MessageFields.PAYLOAD, Schema.STRING_SCHEMA));
-        return messageSchemaBuilder.build();
+    private static void setUpField(final SchemaBuilder schemaBuilder, final Field field) {
+        schemaBuilder.field(field.name(), field.schema());
     }
 
     /**
-     * Builds a {@link Struct} of {@link Message}.
+     * Puts data taken from the {@code sourceStruct} {@link Struct} (belonging to the given {@code field},
+     * into the given {@code destStruct}, in a {@link Field} that has the same name as the said one.
      *
-     * @param message       The {@link Message} from where data is taken.
-     * @param messageSchema The {@link Schema} used to build the {@link Struct}.
-     * @return The created {@link Struct}.
+     * @param destStruct   The {@link Struct} in which data is being put.
+     * @param sourceStruct The {@link Struct} from where data is being taken.
+     * @param field        The {@link Field} owning the data in the {@code sourceStruct}.
+     *                     Its name will be used in the the {@code destStruct}.
+     * @throws RuntimeException If the {@code sourceStruct} does not contain the given {@code field}.
      */
-    private static Struct buildMessageStruct(final Message message, final Schema messageSchema) {
-        final Struct messageStruct = new Struct(messageSchema)
-                .put(MessageFields.MESSAGE_ID, message.getId())
-                .put(MessageFields.SENDER, message.getSender())
-                .put(MessageFields.TIMESTAMP, message.getTimestamp());
-        message.getHeaders().forEach(messageStruct::put);
-        message.getPayload().ifPresent(payload -> messageStruct.put(MessageFields.PAYLOAD, payload));
-        return messageStruct;
+    private static void putField(final Struct destStruct, final Struct sourceStruct, final Field field)
+            throws RuntimeException {
+        final Object value = sourceStruct.get(field);
+        if (value == null) {
+            LOGGER.warn("The data Struct Schema contained a field that is not present in the said Struct");
+            throw new IllegalArgumentException("The given field does not belong to the source Struct.");
+        }
+        destStruct.put(field.name(), value);
     }
 
     /**
