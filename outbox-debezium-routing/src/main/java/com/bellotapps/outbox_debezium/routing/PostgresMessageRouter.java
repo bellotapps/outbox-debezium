@@ -72,29 +72,41 @@ public class PostgresMessageRouter<R extends ConnectRecord<R>> implements Transf
 
         // Ignore tombstones.
         if (record.value() == null) {
-            return record;
+            LOGGER.debug("Received a tombstone. Skipping record!");
+            return null;
         }
-
+        // Check if received data is a Struct.
         if (!record.valueSchema().type().equals(Schema.Type.STRUCT)) {
             LOGGER.warn("Received a record that is not a Struct. Skipping record!");
             return null;
         }
+        // Handle the received Struct.
+        return handleStruct((Struct) record.value(), MessageRecordCreator.fromReceived(record));
+    }
 
-        final Struct recordStruct = (Struct) record.value();
+
+    // ================================================================================================================
+    // Helpers
+    // ================================================================================================================
+
+    /**
+     * Handles the given {@code recordStruct}, creating a new record to be streamed.
+     *
+     * @param recordStruct         The {@link Struct} to be handled.
+     * @param messageRecordCreator A {@link MessageRecordCreator} used to create a new {@link ConnectRecord} with the
+     *                             message to be streamed.
+     * @param <R>                  Concrete subtype of {@link ConnectRecord}.
+     * @return The created record.
+     */
+    private static <R extends ConnectRecord<R>> R handleStruct(
+            final Struct recordStruct,
+            final MessageRecordCreator<R> messageRecordCreator) {
         try {
-            final String operation = recordStruct.getString("op");
-
-            // First check if the operation is a create. This is the only operation that we care.
-            if (!"c".equals(operation)) {
-                // Operation is not a create. Check what it is.
-                // Updates and deletes are part of debezium, but we don't care about them in the outbox pattern.
-                if (!("u".equals(operation) || "d".equals(operation))) {
-                    // If it is not a create, update, or delete, then the message does not comply with the protocol.
-                    LOGGER.warn("Received an unknown operation. Skipping record!");
-                }
+            // First validate the operation.
+            if (!operationIsSupported(recordStruct.getString("op"))) {
                 return null;
             }
-
+            // Then topic and message data from the record.
             final Struct data = recordStruct.getStruct("after");
             final Optional<String> topicOptional = getTopicFromData(data);
             if (!topicOptional.isPresent()) {
@@ -106,18 +118,8 @@ public class PostgresMessageRouter<R extends ConnectRecord<R>> implements Transf
                 LOGGER.warn("Skipping record as message information could not be taken from data");
                 return null;
             }
-
-            final String topic = topicOptional.get();
-            final Struct struct = structOptional.get();
-            return record.newRecord(
-                    topic,
-                    record.kafkaPartition(),
-                    Schema.STRING_SCHEMA,
-                    "message",
-                    struct.schema(),
-                    struct,
-                    record.timestamp()
-            );
+            // If reached here, everything is present. Create a new record.
+            return messageRecordCreator.createMessageRecord(topicOptional.get(), structOptional.get());
         } catch (final DataException e) {
             LOGGER.warn("Missing or invalid \"op\" or \"after\" fields. Skipping record!");
             logErrorAndStacktrace(e);
@@ -128,10 +130,28 @@ public class PostgresMessageRouter<R extends ConnectRecord<R>> implements Transf
         }
     }
 
-
-    // ================================================================================================================
-    // Helpers
-    // ================================================================================================================
+    /**
+     * Validates that the given {@code operation} is supported.
+     *
+     * @param operation The operation to be validated.
+     * @return {@code true} if the operation is supported, or {@code false} otherwise.
+     * @implNote This method will log a debug message if the operation is not supported,
+     * and a warning if the operations is unknown.
+     */
+    private static boolean operationIsSupported(final String operation) {
+        // First check if the operation is a create. This is the only operation that we care.
+        if (!"c".equals(operation)) {
+            // Operation is not a create. Check what it is.
+            // Updates and deletes are part of debezium, but we don't care about them in the outbox pattern.
+            LOGGER.debug("The {} operation is not supported.", operation);
+            if (!("u".equals(operation) || "d".equals(operation))) {
+                // If it is not a create, update, or delete, then the message does not comply with the protocol.
+                LOGGER.warn("Received an unknown operation. Skipping record!");
+            }
+            return false;
+        }
+        return true;
+    }
 
     /**
      * Analyzes the given {@code data} for the kafka topic.
@@ -262,5 +282,44 @@ public class PostgresMessageRouter<R extends ConnectRecord<R>> implements Transf
     private static void logErrorAndStacktrace(final Throwable e) {
         LOGGER.debug("Exception message: {}", e.getMessage());
         LOGGER.trace("Stacktrace: ", e);
+    }
+
+    /**
+     * Defines behaviour for an object that can produce records with a given {@link Struct} data,
+     * to be sent to a given topic.
+     *
+     * @param <R> The concrete subtype of {@link ConnectRecord}.
+     */
+    @FunctionalInterface
+    private interface MessageRecordCreator<R extends ConnectRecord<R>> {
+
+        /**
+         * Creates a message record from the given {@code struct}, to be streamed to the given {@code topic}.
+         *
+         * @param topic  Topic to which the message must be stream.
+         * @param struct The {@link Struct} of the message.
+         * @return The created record.
+         */
+        R createMessageRecord(final String topic, final Struct struct);
+
+        /**
+         * Creates a {@link MessageRecordCreator} from the given {@code received} record.
+         *
+         * @param received The received record (from where message data is taken).
+         * @param <R>      Concrete subtype of {@link ConnectRecord}.
+         * @return The created record.
+         */
+        static <R extends ConnectRecord<R>> MessageRecordCreator<R> fromReceived(final R received) {
+            return (topic, struct) ->
+                    received.newRecord(
+                            topic,
+                            received.kafkaPartition(),
+                            Schema.STRING_SCHEMA,
+                            "message",
+                            struct.schema(),
+                            struct,
+                            received.timestamp()
+                    );
+        }
     }
 }
